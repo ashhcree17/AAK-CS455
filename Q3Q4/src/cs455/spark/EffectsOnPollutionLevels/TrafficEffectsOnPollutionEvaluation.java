@@ -30,7 +30,6 @@ import java.util.List;
 
 public class TrafficEffectsOnPollutionEvaluation
 {
-	private static final int outputCount = 20;  
 	public TrafficEffectsOnPollutionEvaluation(String[] args)
 	{
 		// create a spark session
@@ -45,8 +44,15 @@ public class TrafficEffectsOnPollutionEvaluation
 	
 		// get the needed values out of the lines
 		JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithTraffic());
-		JavaPairRDD<String, ArrayList<String>> trafficData = trafficLines.mapToPair(new GetTrafficForCorrelationWithPollution());
-
+		JavaPairRDD<String, ArrayList<String>> trafficRawData = trafficLines.mapToPair(new GetTrafficForCorrelationWithPollution());
+		JavaPairRDD<String, ArrayList<String>> trafficMetaData = trafficLines.mapToPair(new GetTrafficMetaDataForCorrelationWithPollution());
+		
+		//convert the traffic to lat lon points
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficRawData.join(trafficMetaData);
+		JavaPairRDD<String, ArrayList<String>> trafficP1Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
+		JavaPairRDD<String, ArrayList<String>> trafficP2Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP2());
+		JavaPairRDD<String, ArrayList<String>> trafficData = trafficP1Data.union(trafficP1Data);
+		
 		// correlate the pollution with the traffic
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = trafficData.join(pollutionData);
 		
@@ -56,9 +62,11 @@ public class TrafficEffectsOnPollutionEvaluation
 		// combine duplicate keys
         JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
 
-		// Do some analysis if needed
+		// Average the pollition levels
+		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
 		
 		// and output it (just a couple lines to see if everything above is woring as expected)
+		System.out.println("Traffic Status: Average ozone, particullate_matter, carbon_monoxide, sulfure_dioxide, nitrogen_dioxide");
 		List<Tuple2<String, ArrayList<String>>> output = reduced.collect();
 		for (Tuple2<String, ArrayList<String>> tuple : output) 
 		{
@@ -69,19 +77,37 @@ public class TrafficEffectsOnPollutionEvaluation
 		spark.stop();
 	}
 	
+	private class AveragePollutionLevels implements PairFunction<Tuple2<String, ArrayList<String>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, ArrayList<String>> data)
+		{
+			// data._2() 0-4 is the pollution data, 5 is the count
+			
+			//Sum the data
+			int lastIndex = data._2().size() - 1;
+			double count = Integer.parseInt(data._2().get(lastIndex));
+			ArrayList<String> averaged = new ArrayList<String>();
+			for (int i = 0; i < lastIndex; i++)
+			{
+				averaged.set(i, "" + Integer.parseInt(data._2().get(i)) / count);
+			}
+			
+			return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
+		}
+	}
+	
 	private class ReduceDuplicateKeys implements Function2<ArrayList<String>, ArrayList<String>, ArrayList<String>>
 	{
 		public ArrayList<String> call (ArrayList<String> data1, ArrayList<String> data2)
 		{
-			ArrayList<String> combined = new ArrayList<String>(data1);
-			
-			//combine the data in a logical way as needed (TBD actual columns)
-			combined.set(1, data1.get(1) + data2.get(2));
-			combined.set(2, "" + (Integer.parseInt(data1.get(2)) + Integer.parseInt(data2.get(2))));
-			
-			//combine the counters
-			int lastIndex = combined.size() - 1;
-			combined.set(lastIndex, "" + (Integer.parseInt(data1.get(lastIndex)) + Integer.parseInt(data2.get(lastIndex))));
+			// data._2() 0-4 is the pollution data, 5 is the count
+		
+			//Sum the data
+			ArrayList<String> combined = new ArrayList<String>();
+			for (int i = 0; i < data1.size(); i++)
+			{
+				combined.set(i, "" + Integer.parseInt(data1.get(i)) + Integer.parseInt(data2.get(i)));
+			}
 			
 			return combined;
 		}
@@ -91,56 +117,130 @@ public class TrafficEffectsOnPollutionEvaluation
 	{
 		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
 		{
+			// data._2()._1() is status (0)
+			// data._2()._2() 0-4 is the pollution data
+			
 			// determine the new key (row TBD)
-			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
-			String newKey = newData.get(1);
-			newData.remove(1);
+			String newKey = data._2()._1().get(0);
 			
-			// combine the rest of the data
-			newData.addAll(data._2()._2());
-			
-			//add a counter for averaging
-			newData.add("1"); 
+			// add a row for count so we can average
+			ArrayList<String> newData = new ArrayList<String>(data._2()._2());
+			newData.add("0");
 			
 			return new Tuple2<String, ArrayList<String>>(newKey, newData);
 		}
 	}
-
+	
+	private class ConvertTrafficToLatLonP1 implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
+		{
+			//in data._2()._1() time stamp(0) and status(1)
+			//in data._2()._2() p1 lat(0) and lon(1) and p2 lat(2) and lon(3)
+			// determine the new key
+			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
+			ArrayList<String> secondData = new ArrayList<String>(data._2()._2());
+			String newKey = newData.get(0) + "," + data._2()._2().get(0) + "," + data._2()._2().get(1);
+			newData.remove(0);
+			
+			return new Tuple2<String, ArrayList<String>>(newKey, newData);
+		}
+	}
+	
+	private class ConvertTrafficToLatLonP2 implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
+		{
+			//in data._1() time stamp(0) and status(1)
+			//in data._2() p1 lat(0) and lon(1) and p2 lat(2) and lon(3)
+			// determine the new key
+			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
+			ArrayList<String> secondData = new ArrayList<String>(data._2()._2());
+			String newKey = newData.get(0) + "," + data._2()._2().get(2) + "," + data._2()._2().get(3);
+			newData.remove(0);
+			
+			return new Tuple2<String, ArrayList<String>>(newKey, newData);
+		}
+	}
+	
 	private class GetPollutionForCorrelationWithTraffic implements PairFunction<String, String, ArrayList<String>> 
 	{
 		public Tuple2<String, ArrayList<String>> call(String row) 
 		{ 
+			//Format:
+			//ozone,particullate_matter,carbon_monoxide,sulfure_dioxide,nitrogen_dioxide,longitude,latitude,timestamp
+			
+			//we want the timestamp(7), lat(6) and lon(5) for correlating traffic to pollution and the different levels for analysis
+			
 			//split the data on commas
 			String[] fields = row.split(",");
-			//get the data and location or however we want to correlate it (TBD columns)
-			String dateLoc = fields[0] + "," + fields[1];
-			//get the polution data (TBD columns)
+			
+			//get the data and location or however we want to correlate it
+			String dateLoc = fields[5] + "," + fields[6] + "," + fields[7];
+			
+			//get the polution data
 			ArrayList<String> data = new ArrayList<String>();
 			data.add(fields[0]);
 			data.add(fields[1]);
 			data.add(fields[2]);
+			data.add(fields[3]);
+			data.add(fields[4]);
 		
 			//make sure all the data was good and return it
 			return new Tuple2<String, ArrayList<String>>(dateLoc, data);
 		}
 	}
-  
+	
+  	private class GetTrafficMetaDataForCorrelationWithPollution implements PairFunction<String, String, ArrayList<String>> 
+	{
+		public Tuple2<String, ArrayList<String>> call(String row) 
+		{ 
+			//Format (one-line):			
+			//POINT_1_STREET,DURATION_IN_SEC,POINT_1_NAME,POINT_1_CITY,POINT_2_NAME,POINT_2_LNG,POINT_2_STREET,NDT_IN_KMH,
+			//POINT_2_POSTAL_CODE,POINT_2_COUNTRY,POINT_1_STREET_NUMBER,ORGANISATION,POINT_1_LAT,POINT_2_LAT,POINT_1_POSTAL_CODE,
+			//POINT_2_STREET_NUMBER,POINT_2_CITY,extID,ROAD_TYPE,POINT_1_LNG,REPORT_ID,POINT_1_COUNTRY,DISTANCE_IN_METERS,REPORT_NAME,RBA_ID,_id
+			
+			//we want the id(25) p1 lat(12) and lon(19) and p2 lat(13) and lon(5) for correlating traffic to pollution
+			
+			//split the data on commas
+			String[] fields = row.split(",");
+			//get the id that this point corresponds to
+			String key = fields[25];
+			
+			//get the traffic lat and long associated with the id
+			ArrayList<String> location = new ArrayList<String>();
+			location.add(fields[12]);
+			location.add(fields[19]);
+			location.add(fields[13]);
+			location.add(fields[5]);
+		
+			return new Tuple2<String, ArrayList<String>>(key, location);
+		}
+	}
+	
 	private class GetTrafficForCorrelationWithPollution implements PairFunction<String, String, ArrayList<String>> 
 	{
 		public Tuple2<String, ArrayList<String>> call(String row) 
 		{ 
+			//Format:
+			//status,avgMeasuredTime,avgSpeed,extID,medianMeasuredTime,TIMESTAMP,vehicleCount,_id,REPORT_ID
+			
+			//we want the id(7) and time stamp(5) for correlating traffic to pollution and the status(0) for determining if it affect traffic
+			
 			//split the data on commas
 			String[] fields = row.split(",");
-			//get the data and location or however we want to correlate it (TBD columns)
-			String dateLoc = fields[0] + "," + fields[1];
+			
+			//get the data and location or however we want to correlate it
+			//put the timestamp in here for now until after we map the traffic to locations
+			String key = fields[7];
+			
 			//get the traffic data (TBD columns)
 			ArrayList<String> data = new ArrayList<String>();
+			data.add(fields[5]);
 			data.add(fields[0]);
-			data.add(fields[1]);
-			data.add(fields[2]);
 		
 			//make sure all the data was good and return it
-			return new Tuple2<String, ArrayList<String>>(dateLoc, data);
+			return new Tuple2<String, ArrayList<String>>(key, data);
 		}
 	}
 }

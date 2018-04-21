@@ -23,8 +23,8 @@ public final class SparkMain
   public static void main(String[] args) throws Exception
   {
     // The source file is the first arguement
-    if (args.length < 2) {
-      System.err.println("Usage: TrafficEffectsOnPollution <PollutionDir> <TrafficDir>");
+    if (args.length < 3) {
+      System.err.println("Usage: TrafficEffectsOnPollution <PollutionDir> <TrafficDir> <TrafficMetaDataDir>");
       System.exit(1);
     }
 
