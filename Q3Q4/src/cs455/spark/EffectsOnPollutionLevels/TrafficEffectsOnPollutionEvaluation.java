@@ -49,17 +49,17 @@ public class TrafficEffectsOnPollutionEvaluation
 
 		// correlate the pollution with the traffic
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = trafficData.join(pollutionData);
-		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(
-				tuple -> {
-					ArrayList<String> combined = new ArrayList<String>(tuple._2()._1());
-					combined.addAll(tuple._2()._1());
-					return new Tuple2<String, ArrayList<String>>(tuple._1(), combined);
-				});
+		
+		// reduce them to the keys we care about
+		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
+		
+		// combine duplicate keys
+        JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
 
-		// Do some sort of analysis (TBD)
-
+		// Do some analysis if needed
+		
 		// and output it (just a couple lines to see if everything above is woring as expected)
-		List<Tuple2<String, ArrayList<String>>> output = correlated.collect();
+		List<Tuple2<String, ArrayList<String>>> output = reduced.collect();
 		for (Tuple2<String, ArrayList<String>> tuple : output) 
 		{
 			System.out.println(tuple._1() + ": " + Arrays.toString(tuple._2().toArray()));
@@ -67,6 +67,43 @@ public class TrafficEffectsOnPollutionEvaluation
 
 		// end the session
 		spark.stop();
+	}
+	
+	private class ReduceDuplicateKeys implements Function2<ArrayList<String>, ArrayList<String>, ArrayList<String>>
+	{
+		public ArrayList<String> call (ArrayList<String> data1, ArrayList<String> data2)
+		{
+			ArrayList<String> combined = new ArrayList<String>(data1);
+			
+			//combine the data in a logical way as needed (TBD actual columns)
+			combined.set(1, data1.get(1) + data2.get(2));
+			combined.set(2, "" + (Integer.parseInt(data1.get(2)) + Integer.parseInt(data2.get(2))));
+			
+			//combine the counters
+			int lastIndex = combined.size() - 1;
+			combined.set(lastIndex, "" + (Integer.parseInt(data1.get(lastIndex)) + Integer.parseInt(data2.get(lastIndex))));
+			
+			return combined;
+		}
+	}
+	
+	private class CombineAndRekey implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
+		{
+			// determine the new key (row TBD)
+			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
+			String newKey = newData.get(1);
+			newData.remove(1);
+			
+			// combine the rest of the data
+			newData.addAll(data._2()._2());
+			
+			//add a counter for averaging
+			newData.add("1"); 
+			
+			return new Tuple2<String, ArrayList<String>>(newKey, newData);
+		}
 	}
 
 	private class GetPollutionForCorrelationWithTraffic implements PairFunction<String, String, ArrayList<String>> 
