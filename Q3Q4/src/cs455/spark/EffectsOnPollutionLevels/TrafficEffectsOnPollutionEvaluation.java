@@ -35,12 +35,22 @@ public final class TrafficEffectsOnPollutionEvaluation
 	
 		// get the needed values out of the lines
 		JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithTraffic());
-		JavaPairRDD<String, ArrayList<String>> trafficRawData = trafficLines.mapToPair(new GetTrafficForCorrelationWithPollution());
+		JavaPairRDD<String, ArrayList<String>> trafficRawAllData = trafficLines.mapToPair(new GetTrafficForCorrelationWithPollution());
 		JavaPairRDD<String, ArrayList<String>> trafficMetaData = trafficMetaLines.mapToPair(new GetTrafficMetaDataForCorrelationWithPollution());
 		
+		//remove traffic data with no cars
+		JavaPairRDD<String, ArrayList<String>> trafficRawGoodData = trafficRawAllData.filter(new FilterNoCarsData());
+		
+		//determine the average speed for each sensor
+		JavaPairRDD<String, ArrayList<String>> trafficAverageData = trafficRawGoodData.reduceByKey(new ReduceTrafficAvgSpeeds());
+		JavaPairRDD<String, ArrayList<String>> trafficAverageSpeedData = trafficAverageData.mapToPair(new AverageTrafficSpeeds());
+		
+		//change speed to above or below average
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficAboveOrBelowRawData = trafficAverageSpeedData.join(trafficRawGoodData);
+		JavaPairRDD<String, ArrayList<String>> trafficAboveOrBelowData = trafficAboveOrBelowRawData.mapToPair(new ConvertToBelowOrAboveAvgSpeed());
+	
 		//convert the traffic to lat lon points
-		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficRawData.join(trafficMetaData);
-		trafficLatLonData.saveAsTextFile(args[3]);
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficAboveOrBelowData.join(trafficMetaData);
 		JavaPairRDD<String, ArrayList<String>> trafficP1Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
 		JavaPairRDD<String, ArrayList<String>> trafficP2Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP2());
 		JavaPairRDD<String, ArrayList<String>> trafficData = trafficP1Data.union(trafficP2Data);
@@ -50,15 +60,13 @@ public final class TrafficEffectsOnPollutionEvaluation
 		
 		// reduce them to the keys we care about
 		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
-		correlated.saveAsTextFile(args[3]+"C");
 		
 		// combine duplicate keys
         JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
-		reduced.saveAsTextFile(args[3]+"R");
 		
 		// Average the pollition levels
 		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
-		trafficData.saveAsTextFile(args[3]+"A");
+		averaged.saveAsTextFile(args[3]);
 
 		// end the session
 		spark.stop();
@@ -71,15 +79,13 @@ public final class TrafficEffectsOnPollutionEvaluation
 			// data._2() 0-4 is the pollution data, 5 is the count
 			
 			//Sum the data
+			ArrayList<String> averaged = new ArrayList<String>();
 			int lastIndex = data._2().size() - 1;
 			double count = Double.parseDouble(data._2().get(lastIndex));
-			ArrayList<String> averaged = new ArrayList<String>();
 			for (int i = 0; i < lastIndex; i++)
 			{
 				averaged.add("" + Double.parseDouble(data._2().get(i)) / count);
 			}
-			System.out.println("average: " + averaged);
-			
 			return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
 		}
 	}
@@ -92,11 +98,14 @@ public final class TrafficEffectsOnPollutionEvaluation
 
 			//Sum the data
 			ArrayList<String> combined = new ArrayList<String>();
+			BigInteger d1Value = null;
+			BigInteger d2Value = null;
 			for (int i = 0; i < data1.size(); i++)
 			{
-				combined.add("" + new BigInteger(data1.get(i)) + new BigInteger(data2.get(i)));
+				d1Value = new BigInteger(data1.get(i));
+				d2Value = new BigInteger(data2.get(i));
+				combined.add("" + d1Value.add(d2Value));
 			}
-			System.out.println("combined: " + combined);
 			return combined;
 		}
 	}
@@ -203,6 +212,102 @@ public final class TrafficEffectsOnPollutionEvaluation
 			return new Tuple2<String, ArrayList<String>>(key, location);
 		}
 	}
+		
+	private static class ConvertToBelowOrAboveAvgSpeed implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
+		{
+			// data._2()._1() is average speed for sensor (0)
+			// data._2()._2() 0 is time stamp, 1 is avgSpeed, 2 is vehicle count, 3 is count
+			
+			// use the second dataset to start
+			ArrayList<String> newData = new ArrayList<String>(data._2()._2());
+			
+			//convert the average speed instead to a good/bad
+			if (Integer.parseInt(newData.get(1)) > Double.parseDouble(data._2()._1().get(0)))
+			{
+				newData.set(1, "GOOD");
+			}
+			else
+			{
+				newData.set(1, "BAD");
+			}
+			return new Tuple2<String, ArrayList<String>>(data._1(), newData);
+		}
+	}
+	
+		
+    private static class AverageTrafficSpeeds implements PairFunction<Tuple2<String, ArrayList<String>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, ArrayList<String>> data)
+		{
+			// data._2() 0 is time stamp, 1 is avgSpeed, 2 is vehicle count, 3 is count
+			
+			//Sum the data
+			ArrayList<String> averaged = new ArrayList<String>();
+			averaged.add("" + Double.parseDouble(data._2().get(1)) / Double.parseDouble(data._2().get(3)));
+			return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
+		}
+	}
+	
+	private static class ReduceTrafficAvgSpeeds implements Function2<ArrayList<String>, ArrayList<String>, ArrayList<String>>
+	{
+		public ArrayList<String> call (ArrayList<String> data1, ArrayList<String> data2)
+		{
+			// data._2() 0 is time stamp, 1 is avgSpeed, 2 is vehicle count, 3 is count
+
+			//Sum the data
+			ArrayList<String> combined = new ArrayList<String>();
+			//dont care about time stamp
+			combined.add("");
+			
+			BigInteger d1Value = new BigInteger(data1.get(1));
+			BigInteger d2Value = new BigInteger(data2.get(1));
+			combined.add("" + d1Value.add(d2Value));
+			
+			//dont care about vehicle count here - already filtered out
+			combined.add("");
+			
+			//if we have a count already add it - otherwise it is one
+			if (data1.size() > 3)
+			{
+				d1Value = new BigInteger(data1.get(3));
+			}
+			else
+			{
+			    d1Value = new BigInteger("1");
+			}
+			
+			if (data2.size() > 3)
+			{
+				d2Value = new BigInteger(data2.get(3));
+			}
+			else
+			{
+			    d2Value = new BigInteger("1");
+			}
+			combined.add("" + d1Value.add(d2Value));
+			
+			return combined;
+		}
+	}
+	
+	private static class FilterNoCarsData implements Function<Tuple2<String,ArrayList<String>>,Boolean> 
+	{
+		public Boolean call(Tuple2<String, ArrayList<String>> data) 
+		{
+			try
+			{
+				if (Integer.parseInt(data._2().get(2)) > 0)
+				{
+					return true;
+				}
+			}
+			catch (NumberFormatException nfe) {}
+			
+			return false;	
+		}
+	}
 	
 	private static class GetTrafficForCorrelationWithPollution implements PairFunction<String, String, ArrayList<String>> 
 	{
@@ -211,20 +316,21 @@ public final class TrafficEffectsOnPollutionEvaluation
 			//Format:
 			//status,avgMeasuredTime,avgSpeed,extID,medianMeasuredTime,TIMESTAMP,vehicleCount,_id,REPORT_ID
 			
-			//we want the REPORT_ID(8) and time stamp(5) for correlating traffic to pollution and the status(0) for determining if it affect traffic
+			//we want the REPORT_ID(8) and time stamp(5) for correlating traffic to pollution and the average speed(2) and vehicle count (6) for determining if it affect traffic
 			
 			//split the data on commas
 			String[] fields = row.split(",");
 			
 			//get the data and location or however we want to correlate it
-			//put the timestamp in here for now until after we map the traffic to locations
-			//replace the T with a " " to make it match the pollution timestamp
 			String key = fields[8];
 			
 			//get the traffic data 
 			ArrayList<String> data = new ArrayList<String>();
+			//put the timestamp in here for now until after we map the traffic to locations
+			//replace the T with a " " to make it match the pollution timestamp
 			data.add(fields[5].replace('T', ' '));
-			data.add(fields[0]);
+			data.add(fields[2]);
+			data.add(fields[6]);
 		
 			//make sure all the data was good and return it
 			return new Tuple2<String, ArrayList<String>>(key, data);
