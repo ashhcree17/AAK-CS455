@@ -187,21 +187,28 @@ public final class WeatherEffectsOnParkingEvaluation {
 				we want the KEY,VALUE for correlating parking to weather
 			*/
 
-
 			// ********* BELOW NEEDS TO CHANGE ************ //
 			//split the data on commas
-			// String[] fields = row.split(",");
+			String[] keyValuePairs = row.split(",");
+
+			Map<String, String> keyValues = new HashMap();
+			for (String str : keyValuePairs) {
+				String[] tempValue = str.split(":");
+
+				keyValues.put(tempValue[0], tempValue[1]);
+			}
 			
-			// //get the data and location or however we want to correlate it
-			// String date = fields[7];
+			//get the data to correlate it
+			String date = keyValues.forEach(() => {
+
+			});
 			
-			// //get the polution data
-			// ArrayList<String> measurement = new ArrayList<String>();
-			// measurement.add(fields[0]);
+			//get the weather data
+			ArrayList<String> data = new ArrayList<String>();
+			data.add(fields[0]);
 		
-			// //make sure all the data was good and return it
-			// return new Tuple2<String, ArrayList<String>>(date, measurement);
-				return null;
+			//make sure all the data was good and return it
+			return new Tuple2<String, ArrayList<String>>(date, data);
 		}
 	}
 
