@@ -10,6 +10,7 @@ import org.apache.spark.sql.SparkSession;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
+import java.math.BigInteger;
 
 public final class TrafficEffectsOnPollutionEvaluation
 {
@@ -36,10 +37,6 @@ public final class TrafficEffectsOnPollutionEvaluation
 		JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithTraffic());
 		JavaPairRDD<String, ArrayList<String>> trafficRawData = trafficLines.mapToPair(new GetTrafficForCorrelationWithPollution());
 		JavaPairRDD<String, ArrayList<String>> trafficMetaData = trafficMetaLines.mapToPair(new GetTrafficMetaDataForCorrelationWithPollution());
-		pollutionData.saveAsTextFile(args[3]+"2");
-		
-		
-		//JavaPairRDD<String, ArrayList<String>> pollutionDataOnly = pollutionData.filter(new RemoveText());
 		
 		//convert the traffic to lat lon points
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficRawData.join(trafficMetaData);
@@ -47,11 +44,9 @@ public final class TrafficEffectsOnPollutionEvaluation
 		JavaPairRDD<String, ArrayList<String>> trafficP1Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
 		JavaPairRDD<String, ArrayList<String>> trafficP2Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP2());
 		JavaPairRDD<String, ArrayList<String>> trafficData = trafficP1Data.union(trafficP2Data);
-		trafficData.saveAsTextFile(args[3]+"3");
 		
 		// correlate the pollution with the traffic
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = trafficData.join(pollutionData);
-		correlatedTuples.saveAsTextFile(args[3]+"T");
 		
 		// reduce them to the keys we care about
 		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
@@ -69,22 +64,6 @@ public final class TrafficEffectsOnPollutionEvaluation
 		spark.stop();
 	}
 	
-	/*private static class RemoveText implements Function2<String, ArrayList<String>, bool>
-	{
-		public bool call (String key, ArrayList<String> data)
-		{
-			try
-			{
-				Integer.parseInt(data.get(0));
-				return true;
-			}
-			catch (NullPointerException nfe)
-			{
-				return false;
-			}
-		}
-	}*/
-	
 	private static class AveragePollutionLevels implements PairFunction<Tuple2<String, ArrayList<String>>, String, ArrayList<String>>
 	{
 		public Tuple2<String, ArrayList<String>> call (Tuple2<String, ArrayList<String>> data)
@@ -93,12 +72,13 @@ public final class TrafficEffectsOnPollutionEvaluation
 			
 			//Sum the data
 			int lastIndex = data._2().size() - 1;
-			double count = Integer.parseInt(data._2().get(lastIndex));
+			double count = Double.parseDouble(data._2().get(lastIndex));
 			ArrayList<String> averaged = new ArrayList<String>();
 			for (int i = 0; i < lastIndex; i++)
 			{
-				averaged.set(i, "" + Integer.parseInt(data._2().get(i)) / count);
+				averaged.add("" + Double.parseDouble(data._2().get(i)) / count);
 			}
+			System.out.println("average: " + averaged);
 			
 			return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
 		}
@@ -109,28 +89,14 @@ public final class TrafficEffectsOnPollutionEvaluation
 		public ArrayList<String> call (ArrayList<String> data1, ArrayList<String> data2)
 		{
 			// data._2() 0-4 is the pollution data, 5 is the count
-			if(data1.size() < 5)
-			{
-				System.err.println("d1: " + data1.size() + " " + Arrays.toString(data1.toArray()));
-				if(data2.size() < 5)
-				{
-					System.err.println("d2: " + data2.size() + " " + Arrays.toString(data2.toArray()));
-				}
-				return data1;
-			}
-			if(data2.size() < 5)
-			{
-				System.err.println("d2: " + data2.size() + " " + Arrays.toString(data2.toArray()));
-				return data1;
-			}
-			
+
 			//Sum the data
 			ArrayList<String> combined = new ArrayList<String>();
 			for (int i = 0; i < data1.size(); i++)
 			{
-				combined.set(i, "" + Integer.parseInt(data1.get(i)) + Integer.parseInt(data2.get(i)));
+				combined.add("" + new BigInteger(data1.get(i)) + new BigInteger(data2.get(i)));
 			}
-			
+			System.out.println("combined: " + combined);
 			return combined;
 		}
 	}
