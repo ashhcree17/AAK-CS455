@@ -16,9 +16,9 @@ import java.util.List;
 */
 public final class ActivityEffectsOnPollutionEvaluation {
 	public static void main(String[] args) throws Exception {
-		// The source file is the first arguement
-		if (args.length < 3) {
-			System.err.println("Usage: ActivityEffectsOnPollution <PollutionDir> <EventDir> <OutputDir>");
+		// The source file is the first argument
+		if (args.length < 4) {
+			System.err.println("Usage: ActivityEffectsOnPollution <PollutionDir> <CulturalEventDir> <LibraryEventDir> <OutputDir>");
 			System.exit(1);
 		}
 		
@@ -52,12 +52,12 @@ public final class ActivityEffectsOnPollutionEvaluation {
 		correlated.saveAsTextFile(args[3]+"-correlated");
 		
 		// combine duplicate keys
-    JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
+    	JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
 		reduced.saveAsTextFile(args[3]+"-reduced");
 		
 		// Average the pollution levels
 		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
-		trafficData.saveAsTextFile(args[3]+"-averaged");
+		eventsData.saveAsTextFile(args[3]+"-averaged");
 
 		// end the session
 		spark.stop();

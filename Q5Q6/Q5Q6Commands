@@ -1,0 +1,7 @@
+--Q5 Command--
+
+$SPARK_HOME/bin/spark-submit --deploy-mode cluster --class cs455.spark.Q5EventParkingConditions.WeatherEffectsOnParkingEvaluation --supervise dist/EffectsOnParkingAndPollution.jar /data/weather/raw_weather_data_aug_sep /data/parking /data/metadata/aarhus_parking_address.csv /data/events/cultural_events_aarhus.csv /data/events/library_events_aarhus.csv /home/Q5/out
+
+--Q6 Command--
+
+$SPARK_HOME/bin/spark-submit --deploy-mode cluster --class cs455.spark.Q6ActivityLevelsPollutionEffect.ActivityEffectsOnPollutionEvaluation --supervise dist/EffectsOnParkingAndPollution.jar /data/pollution /data/events/cultural_events_aarhus.csv /data/events/library_events_aarhus.csv /home/Q6/out

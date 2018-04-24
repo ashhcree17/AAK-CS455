@@ -19,7 +19,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 	public static void main(String[] args) throws Exception {
 		// The source file is the first arguement
 		if (args.length < 4) {
-			System.err.println("Usage: WeatherEffectsOnParking <WeatherDir> <ParkingDir> <EventDir> <OutputDir>");
+			System.err.println("Usage: WeatherEffectsOnParking <WeatherDir> <ParkingDir> <ParkingMetaDataDir> <CulturalEventDir> <LibraryEventDir> <OutputDir>");
 			System.exit(1);
 		}
 		
@@ -39,7 +39,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 		// get the needed values out of the lines
 		JavaPairRDD<String, ArrayList<String>> weatherData = weatherLines
 											.mapToPair(new GetWeatherForCorrelationWithParking());
-		JavaPairRDD<String, ArrayList<String>> parkingData = parkingLines
+		JavaPairRDD<String, ArrayList<String>> parkingRawData = parkingLines
 											.mapToPair(new GetParkingForCorrelationWithWeather());
 		JavaPairRDD<String, ArrayList<String>> parkingMetaData = parkingMetaDataLines
 											.mapToPair(new GetParkingMetaForCorrelationWithWeather());
@@ -48,15 +48,29 @@ public final class WeatherEffectsOnParkingEvaluation {
 		JavaPairRDD<String, ArrayList<String>> libraryEventData = 
 		    libraryEventLines.mapToPair(new GetLibraryEventForCorrelationWithPollution());
 		JavaPairRDD<String, ArrayList<String>> eventsData = culturalEventData.union(libraryEventData);
+
+		/*
+		//convert the traffic to lat lon points
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficRawData.join(trafficMetaData);
+		trafficLatLonData.saveAsTextFile(args[3]);
+		JavaPairRDD<String, ArrayList<String>> trafficP1Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
+		JavaPairRDD<String, ArrayList<String>> trafficP2Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP2());
+		JavaPairRDD<String, ArrayList<String>> trafficData = trafficP1Data.union(trafficP2Data);
+		*/
 		
+		//convert the parking to lat lon points
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> parkingLatLonData = parkingRawData.join(parkingMetaData);
+		parkingLatLonData.saveAsTextFile(args[5]);
+		JavaPairRDD<String, ArrayList<String>> parkingConvertedData = parkingLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
+		JavaPairRDD<String, ArrayList<String>> trafficData = parkingConvertedData.union(trafficP2Data);
 
 		// correlate the weather with the events
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
-		  = eventsData.join(pollutionData);
+		  = eventsData.join(weatherData);
 
 		// correlate the weather with the parking
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
-		  = eventsData.join(pollutionData);
+		  = parkingData.join(pollutionData);
 
 		// // reduce them to the keys we care about
 		// JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
@@ -70,8 +84,8 @@ public final class WeatherEffectsOnParkingEvaluation {
 		// JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
 		// trafficData.saveAsTextFile(args[5]+"A");
 
-		// // end the session
-		// spark.stop();
+		// end the session
+		spark.stop();
 	}
 	
 	/*
@@ -89,19 +103,22 @@ public final class WeatherEffectsOnParkingEvaluation {
 			 	events & weather to parking
 			*/
 
+			// ********* BELOW NEEDS TO CHANGE ************ //
+
 			//  data._2() 0-4 is the pollution data, 5 is the count
 			
 			//Sum the data
-			int firstIndex = data._2().get(0);
-			double count = Double.parseDouble(data._2().get(lastIndex));
-			ArrayList<String> averaged = new ArrayList<String>();
+			// int lastIndex = data._2().get(0);
+			// double count = Double.parseDouble(data._2().get(lastIndex));
+			// ArrayList<String> averaged = new ArrayList<String>();
 
-			for (int i = 0; i < lastIndex; i++) {
-				averaged.add("" + Double.parseDouble(data._2().get(i)) / count);
-			}
-			System.out.println("average: " + averaged);
+			// for (int i = 0; i < lastIndex; i++) {
+			// 	averaged.add("" + Double.parseDouble(data._2().get(i)) / count);
+			// }
+			// System.out.println("average: " + averaged);
 			
-			return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
+			// return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
+			return null;
 		}
 	}
 	
@@ -131,6 +148,21 @@ public final class WeatherEffectsOnParkingEvaluation {
 			// add a row for count so we can average
 			ArrayList<String> newData = new ArrayList<String>(data._2()._2());
 			newData.add("1");
+			
+			return new Tuple2<String, ArrayList<String>>(newKey, newData);
+		}
+	}
+
+	private static class ConvertParkingToLatLon implements PairFunction<
+	  Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, 
+		 Tuple2<ArrayList<String>, ArrayList<String>>> data) {
+			//in data._2()._1() time stamp(0) and status(1)
+			//in data._2()._2() p1 lat(0) and lon(1) and p2 lat(2) and lon(3)
+			// determine the new key
+			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
+			String newKey = data._2()._2().get(0) + "," + data._2()._2().get(1) + "," + newData.get(0);
+			newData.remove(0);
 			
 			return new Tuple2<String, ArrayList<String>>(newKey, newData);
 		}
@@ -169,6 +201,31 @@ public final class WeatherEffectsOnParkingEvaluation {
 		
 			// //make sure all the data was good and return it
 			// return new Tuple2<String, ArrayList<String>>(date, measurement);
+				return null;
+		}
+	}
+
+	private static class GetParkingForCorrelationWithWeather implements 
+	 PairFunction<String, String, ArrayList<String>> {
+		public Tuple2<String, ArrayList<String>> call(String row) { 
+			/* Format (one-line):
+				VEHICLECOUNT(0),UPDATETIME(1),_ID(2),TOTALSPACES(3),
+				GARAGECODE(4),STREAMTIME(5)
+
+			 	we want the VEHICLECOUNT(0) & GARAGECODE(4) for correlating 
+			 	events & weather to parking
+			*/
+			
+			//split the data on commas
+			String[] fields = row.split(",");
+			//get the id that this point corresponds to
+			String key = fields[4];
+			
+			//get the traffic lat and long associated with the id
+			ArrayList<String> data = new ArrayList<String>();
+			data.add(fields[0]);
+			
+			return new Tuple2<String, ArrayList<String>>(key, data);
 		}
 	}
 
@@ -186,14 +243,12 @@ public final class WeatherEffectsOnParkingEvaluation {
 			//split the data on commas
 			String[] fields = row.split(",");
 			//get the id that this point corresponds to
-			String key = fields[20];
+			String key = fields[0];
 			
 			//get the traffic lat and long associated with the id
 			ArrayList<String> location = new ArrayList<String>();
-			location.add(fields[12]);
-			location.add(fields[19]);
-			location.add(fields[13]);
 			location.add(fields[5]);
+			location.add(fields[6]);
 		
 			return new Tuple2<String, ArrayList<String>>(key, location);
 		}
