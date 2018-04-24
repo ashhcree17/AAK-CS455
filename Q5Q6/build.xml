@@ -1,12 +1,12 @@
 <project name="MapReduce" default="dist" basedir=".">
     <description>
-        simple example build file
+        HW4 build file for Q5 and Q6
     </description>
   <!-- set global properties for this build -->
   <property name="src" location="src"/>
   <property name="build" location="build"/>
   <property name="dist"  location="dist"/>
-  <property name="lib.dir" location="/s/bach/m/under/krice17/spark-2.2.0-bin-hadoop2.7" />
+  <property name="lib.dir" location="/s/chopin/a/grad/ashhcree/spark-2.2.0-bin-hadoop2.7" />
 
   <target name="init">
     <!-- Create the time stamp -->
@@ -34,7 +34,8 @@
     <mkdir dir="${dist}"/>
 
     <!-- Put everything in ${build} into the MyProject-${DSTAMP}.jar file -->
-    <jar jarfile="${dist}/EffectsOnPollutionLevels.jar" basedir="${build}"/>
+    <jar jarfile="${dist}/EffectsOnParkingAndPollution.jar" basedir="${build}"/>
+    <!-- <jar jarfile="${dist}/EffectsOnPollution.jar" basedir="${build}"/> -->
   </target>
 
   <target name="clean"
