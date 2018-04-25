@@ -91,7 +91,7 @@ public final class WeatherParser
 			}
 			
 			//for dewpoint check if its higher than the temperature
-			if (Double.parseDouble(data._2()._2()._2().get(1)) > Double.parseDouble(data._2()._2()._2().get(0)))
+			if (Double.parseDouble(data._2()._2()._2().get(1)) > Double.parseDouble(data._2()._1().get(1)))
 			{
 				newData.add("HIGH_PRESSURE");
 			}
