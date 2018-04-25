@@ -13,7 +13,8 @@ import java.util.List;
 import java.math.BigInteger;
 import java.util.Iterator;
 
-import cs455.spark.WeatherParser.WeatherParser;
+import cs455.spark.Utils.Helper;
+import cs455.spark.Utils.WeatherParser;
 
 public final class WeatherEffectsOnPollutionEvaluation
 {
@@ -33,9 +34,92 @@ public final class WeatherEffectsOnPollutionEvaluation
 
 		//parse the weather
 		JavaPairRDD<String, ArrayList<String>> weatherData = WeatherParser.parseWeather(args[1], spark);
-		weatherData.saveAsTextFile(args[2]);
+		
+		//Get the on the hour pollution levels
+		JavaRDD<String> pollutionLines = spark.read().textFile(args[0]).javaRDD();
+		JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithWeather());
+		JavaPairRDD<String, ArrayList<String>> pollutionHourData = pollutionData.filter(new FilterOnTheHour());
+		
+		//total the pollution reading for all locations over the hour
+		JavaPairRDD<String, ArrayList<String>> pollutionHourTotalData = pollutionHourData.reduceByKey(new Helper.ReduceDuplicateKeys());
+		
+		//correlate the pollution and weather
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = weatherData.join(pollutionHourTotalData);
+		
+		// reduce them to the keys we care about
+		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
+		
+		//total the pollution reading on the weather keys
+		JavaPairRDD<String, ArrayList<String>> weatherTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
+		
+		//now average them
+		JavaPairRDD<String, ArrayList<String>> weatherAvgs = weatherTotals.mapToPair(new Helper.AverageData());
+		weatherAvgs.saveAsTextFile(args[2]);
 		
 		// end the session
 		spark.stop();
+	}
+		
+	private static class CombineAndRekey implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>>
+	{
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data)
+		{
+			// data._2()._1() is the weather data
+			// data._2()._2() 0-5 is the pollution data and count
+			
+			// The key is the weather data
+			String newKey = data._2()._1().get(0) + "," + data._2()._1().get(1) + "," + data._2()._1().get(2);
+			
+			//the data is the pollution data
+			return new Tuple2<String, ArrayList<String>>(newKey, new ArrayList<String>(data._2()._2()));
+		}
+	}
+	
+	private static class FilterOnTheHour implements Function<Tuple2<String,ArrayList<String>>,Boolean> 
+	{
+		public Boolean call(Tuple2<String, ArrayList<String>> data) 
+		{
+			String[] timeSplit = data._1().split("T");
+			try
+			{
+				if (timeSplit[1].trim().endsWith("00:00"))
+				{
+					return true;
+				}
+			}
+			//means its not a data row if it couldn't split on T
+			catch (IndexOutOfBoundsException oibe) {}
+			
+			return false;	
+		}
+	}
+	
+	private static class GetPollutionForCorrelationWithWeather implements PairFunction<String, String, ArrayList<String>> 
+	{
+		public Tuple2<String, ArrayList<String>> call(String row) 
+		{ 
+			//Format:
+			//ozone,particullate_matter,carbon_monoxide,sulfure_dioxide,nitrogen_dioxide,longitude,latitude,timestamp
+			
+			//we want the timestamp(7) for correlating weather to pollution and the different levels for analysis
+			
+			//split the data on commas
+			String[] fields = row.split(",");
+			
+			//get the data and location or however we want to correlate it (change timestamp to have T to match weather)
+			String date = fields[7].replace(' ', 'T');
+			
+			//get the polution data
+			ArrayList<String> data = new ArrayList<String>();
+			data.add(fields[0]);
+			data.add(fields[1]);
+			data.add(fields[2]);
+			data.add(fields[3]);
+			data.add(fields[4]);
+			data.add("1"); //a count
+		
+			//make sure all the data was good and return it
+			return new Tuple2<String, ArrayList<String>>(date, data);
+		}
 	}
 }

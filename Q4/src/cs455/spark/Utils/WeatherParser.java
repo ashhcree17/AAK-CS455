@@ -1,4 +1,4 @@
-package cs455.spark.WeatherParser;
+package cs455.spark.Utils;
 
 import scala.Tuple2;
 
