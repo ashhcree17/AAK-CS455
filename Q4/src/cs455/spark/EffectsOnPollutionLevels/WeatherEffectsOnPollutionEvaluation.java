@@ -40,21 +40,37 @@ public final class WeatherEffectsOnPollutionEvaluation
 		JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithWeather());
 		JavaPairRDD<String, ArrayList<String>> pollutionHourData = pollutionData.filter(new FilterOnTheHour());
 		
-		//total the pollution reading for all locations over the hour
-		JavaPairRDD<String, ArrayList<String>> pollutionHourTotalData = pollutionHourData.reduceByKey(new Helper.ReduceDuplicateKeys());
-		
 		//correlate the pollution and weather
-		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = weatherData.join(pollutionHourTotalData);
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples = weatherData.join(pollutionHourData);
 		
-		// reduce them to the keys we care about
+		// Change them to the keys we care about
 		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
 		
-		//total the pollution reading on the weather keys
+		//average the pollution reading on the weather keys
 		JavaPairRDD<String, ArrayList<String>> weatherTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
-		
-		//now average them
 		JavaPairRDD<String, ArrayList<String>> weatherAvgs = weatherTotals.mapToPair(new Helper.AverageData());
-		weatherAvgs.saveAsTextFile(args[2]);
+		//weatherAvgs.saveAsTextFile(args[2]+"_avgs");
+		
+		//determine the min and max
+		JavaPairRDD<String, ArrayList<String>> weatherMins = correlated.reduceByKey(new Helper.MinOfData());
+		JavaPairRDD<String, ArrayList<String>> weatherMinsNoCount = weatherMins.mapToPair(new Helper.StripCountOff());
+		JavaPairRDD<String, ArrayList<String>> weatherMaxs = correlated.reduceByKey(new Helper.MaxOfData());
+		JavaPairRDD<String, ArrayList<String>> weatherMaxsNoCount = weatherMaxs.mapToPair(new Helper.StripCountOff());
+		//weatherMinsNoCount.saveAsTextFile(args[2]+"_mins");
+		//weatherMaxsNoCount.saveAsTextFile(args[2]+"_maxs");
+		
+		//determine the mean
+		
+		
+		//determine the std dev
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> weatherWithAvgs = weatherAvgs.join(correlated);
+		JavaPairRDD<String, ArrayList<String>> weatherPrepedForStdDev = weatherWithAvgs.mapToPair(new Helper.PrepForStdDevOfData());
+		JavaPairRDD<String, ArrayList<String>> weatherPrepedForStdDevReduced = weatherPrepedForStdDev.reduceByKey(new Helper.ReduceDuplicateKeysDoubles());
+		JavaPairRDD<String, ArrayList<String>> weatherStdDevs = weatherPrepedForStdDevReduced.mapToPair(new Helper.StdDevOfData());
+		weatherPrepedForStdDev.saveAsTextFile(args[2]+"2");
+		weatherPrepedForStdDevReduced.saveAsTextFile(args[2]+"3");
+		weatherStdDevs.saveAsTextFile(args[2]+"_stddevs");
+		
 		
 		// end the session
 		spark.stop();
