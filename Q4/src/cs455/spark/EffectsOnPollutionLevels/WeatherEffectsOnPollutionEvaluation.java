@@ -49,18 +49,15 @@ public final class WeatherEffectsOnPollutionEvaluation
 		//average the pollution reading on the weather keys
 		JavaPairRDD<String, ArrayList<String>> weatherTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
 		JavaPairRDD<String, ArrayList<String>> weatherAvgs = weatherTotals.mapToPair(new Helper.AverageData());
-		//weatherAvgs.saveAsTextFile(args[2]+"_avgs");
+		weatherAvgs.saveAsTextFile(args[2]+"_avgs");
 		
 		//determine the min and max
 		JavaPairRDD<String, ArrayList<String>> weatherMins = correlated.reduceByKey(new Helper.MinOfData());
 		JavaPairRDD<String, ArrayList<String>> weatherMinsNoCount = weatherMins.mapToPair(new Helper.StripCountOff());
 		JavaPairRDD<String, ArrayList<String>> weatherMaxs = correlated.reduceByKey(new Helper.MaxOfData());
 		JavaPairRDD<String, ArrayList<String>> weatherMaxsNoCount = weatherMaxs.mapToPair(new Helper.StripCountOff());
-		//weatherMinsNoCount.saveAsTextFile(args[2]+"_mins");
-		//weatherMaxsNoCount.saveAsTextFile(args[2]+"_maxs");
-		
-		//determine the mean
-		
+		weatherMinsNoCount.saveAsTextFile(args[2]+"_mins");
+		weatherMaxsNoCount.saveAsTextFile(args[2]+"_maxs");
 		
 		//determine the std dev
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> weatherWithAvgs = weatherAvgs.join(correlated);
