@@ -64,21 +64,22 @@ public final class WeatherEffectsOnParkingEvaluation {
 		JavaPairRDD<String, ArrayList<String>> parkingConvertedData = parkingLatLonData.mapToPair(new ConvertParkingToLatLon());
 
 		// correlate the weather with the events
-		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> eventCorrelatedTuples
 		  = culturalEventData.join(weatherData);
 
 		// correlate the weather with the parking
-		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
-		  = parkingData.join(weatherData);
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> parkingCorrelatedTuples
+		  = parkingConvertedData.join(weatherData);
 
 		// reduce them to the keys we care about
-		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
+		JavaPairRDD<String, ArrayList<String>> correlatedEvents = eventCorrelatedTuples.mapToPair(new CombineAndRekeyEvents());
+		JavaPairRDD<String, ArrayList<String>> correlatedParking = parkingCorrelatedTuples.mapToPair(new CombineAndRekeyParking());
 		
 		// combine duplicate keys
         JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
 		
-		// Average the pollition levels
-		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
+		// Average the polution levels
+		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AverageParkingLevels());
 		averaged.saveAsTextFile(args[5]);
 
 		// end the session
@@ -132,16 +133,41 @@ public final class WeatherEffectsOnParkingEvaluation {
 		}
 	}
 	
-	private static class CombineAndRekey implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
+	private static class CombineAndRekeyParking implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
 		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data) {
-			// data._2()._1() is status (0) 
+			// data._2()._1() status - lat, long, garagecode:percentAvailable
 			// data._2()._2() 0-4 is the pollution data 
-			
+			//OLD ABOVE
+
+
+			//in data._2()._1() -- raw data - GARAGECODE(0), VEHICLECOUNT(1), TOTALSPACES(2)
+			//in data._2()._2() -- meta data - GARAGECODE(0), LATITUDE(1), LONGITUDE(2)
+
+
 			// determine the new key (row TBD)
 			String newKey = data._2()._1().get(0);
 			
 			// add a row for count so we can average
 			ArrayList<String> newData = new ArrayList<String>(data._2()._2());
+			newData.add("1");
+			
+			return new Tuple2<String, ArrayList<String>>(newKey, newData);
+		}
+	}
+
+	private static class CombineAndRekeyEvents implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
+		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data) {
+			// data._2()._1() 
+			// data._2()._2() 0-4 is the pollution data 
+			// OLD ABOVE
+
+			//in data._2()._1() -- data - EVENT_ID(0), EVENT_DATE_TIME(1), ATTENDEES_NUMBER(2)
+			
+			// determine the new key -- IS THE EVENT ID
+			String newKey = data._2()._1().get(0);
+			
+			// add a row for count so we can average
+			ArrayList<String> newData = new ArrayList<String>(data._2()._1().get(1), data._2()._1().get(2));
 			newData.add("1");
 			
 			return new Tuple2<String, ArrayList<String>>(newKey, newData);
@@ -160,6 +186,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 
 			// determine percentage of available parking (vehicle count / total spaces) 
 			BigInteger percentAvailable = newData.get(1) / newData.get(2);
+			// lat, long, garagecode:percentAvailable
 			String newKey = data._2()._2().get(0) + "," + data._2()._2().get(1) + "," + newData.get(0) + ":" + percentAvailable;
 			newData.remove(0);
 			
