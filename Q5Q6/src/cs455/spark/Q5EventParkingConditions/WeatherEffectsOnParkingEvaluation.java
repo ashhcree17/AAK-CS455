@@ -19,7 +19,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 	public static void main(String[] args) throws Exception {
 		// The source file is the first arguement
 		if (args.length < 4) {
-			System.err.println("Usage: WeatherEffectsOnParking <WeatherDir> <ParkingDir> <ParkingMetaDataDir> <CulturalEventDir> <LibraryEventDir> <OutputDir>");
+			System.err.println("Usage: WeatherEffectsOnParking <WeatherDir> <ParkingDir> <ParkingMetaDataDir> <CulturalEventDir> <OutputDir>");
 			System.exit(1);
 		}
 		
@@ -30,7 +30,19 @@ public final class WeatherEffectsOnParkingEvaluation {
 			.getOrCreate();
 
 		// read in the files (if passed a directory, it will read all files in it)
-		JavaRDD<String> weatherLines = spark.read().textFile(args[0]).javaRDD();
+		JavaRDD<String> weatherLines = spark.read().textFile(args[0]).map(
+		  new Function<String, Record>() {
+		      public Weather call(String line) throws Exception {
+		         // Here you can use JSON
+		        Gson gson = new Gson();
+		        gson.fromJson(line, Weather.class);
+		      	Weather weather = gson.fromJson(line, Weather.class);
+
+		        String[] fields = line.split(",");
+		        Weather weatherData = new Weather(fields[0], fields[1]);
+		        return weatherData;
+		      }
+		});
 		JavaRDD<String> parkingLines = spark.read().textFile(args[1]).javaRDD();
 		JavaRDD<String> parkingMetaDataLines = spark.read().textFile(args[2]).javaRDD();
 		JavaRDD<String> culturalEventLines = spark.read().textFile(args[3]).javaRDD();
@@ -45,44 +57,29 @@ public final class WeatherEffectsOnParkingEvaluation {
 											.mapToPair(new GetParkingMetaForCorrelationWithWeather());
 		JavaPairRDD<String, ArrayList<String>> culturalEventData = 
 		    culturalEventLines.mapToPair(new GetCulturalEventForCorrelationWithPollution());
-		JavaPairRDD<String, ArrayList<String>> libraryEventData = 
-		    libraryEventLines.mapToPair(new GetLibraryEventForCorrelationWithPollution());
-		JavaPairRDD<String, ArrayList<String>> eventsData = culturalEventData.union(libraryEventData);
-
-		/*
-		//convert the traffic to lat lon points
-		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficLatLonData = trafficRawData.join(trafficMetaData);
-		trafficLatLonData.saveAsTextFile(args[3]);
-		JavaPairRDD<String, ArrayList<String>> trafficP1Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
-		JavaPairRDD<String, ArrayList<String>> trafficP2Data = trafficLatLonData.mapToPair(new ConvertTrafficToLatLonP2());
-		JavaPairRDD<String, ArrayList<String>> trafficData = trafficP1Data.union(trafficP2Data);
-		*/
 		
 		//convert the parking to lat lon points
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> parkingLatLonData = parkingRawData.join(parkingMetaData);
 		parkingLatLonData.saveAsTextFile(args[5]);
-		JavaPairRDD<String, ArrayList<String>> parkingConvertedData = parkingLatLonData.mapToPair(new ConvertTrafficToLatLonP1());
-		JavaPairRDD<String, ArrayList<String>> trafficData = parkingConvertedData.union(trafficP2Data);
+		JavaPairRDD<String, ArrayList<String>> parkingConvertedData = parkingLatLonData.mapToPair(new ConvertParkingToLatLon());
 
 		// correlate the weather with the events
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
-		  = eventsData.join(weatherData);
+		  = culturalEventData.join(weatherData);
 
 		// correlate the weather with the parking
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> correlatedTuples
-		  = parkingData.join(pollutionData);
+		  = parkingData.join(weatherData);
 
-		// // reduce them to the keys we care about
-		// JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
-		// correlated.saveAsTextFile(args[5]+"C");
+		// reduce them to the keys we care about
+		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
 		
-		// // combine duplicate keys
-  //       JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
-		// reduced.saveAsTextFile(args[5]+"R");
+		// combine duplicate keys
+        JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
 		
-		// // Average the pollition levels
-		// JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
-		// trafficData.saveAsTextFile(args[5]+"A");
+		// Average the pollition levels
+		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
+		averaged.saveAsTextFile(args[5]);
 
 		// end the session
 		spark.stop();
@@ -99,7 +96,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 			/* Format (one-line):
 				VEHICLECOUNT(0),UPDATETIME(1),_ID(2),TOTALSPACES(3),GARAGECODE(4),STREAMTIME(5)
 
-			 	we want the VEHICLECOUNT(0) & GARAGECODE(4) for correlating 
+			 	we want the VEHICLECOUNT(0), TOTALSPACES(3), GARAGECODE(4) for correlating 
 			 	events & weather to parking
 			*/
 
@@ -115,7 +112,6 @@ public final class WeatherEffectsOnParkingEvaluation {
 			// for (int i = 0; i < lastIndex; i++) {
 			// 	averaged.add("" + Double.parseDouble(data._2().get(i)) / count);
 			// }
-			// System.out.println("average: " + averaged);
 			
 			// return new Tuple2<String, ArrayList<String>>(data._1(), averaged);
 			return null;
@@ -132,15 +128,14 @@ public final class WeatherEffectsOnParkingEvaluation {
 				combined.add("" + new BigInteger(data1.get(i)) + new BigInteger(data2.get(i)));
 			}
 			
-			System.out.println("combined: " + combined);
 			return combined;
 		}
 	}
 	
 	private static class CombineAndRekey implements PairFunction<Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
 		public Tuple2<String, ArrayList<String>> call (Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>> data) {
-			// data._2()._1() is status (0)
-			// data._2()._2() 0-4 is the pollution data
+			// data._2()._1() is status (0) 
+			// data._2()._2() 0-4 is the pollution data 
 			
 			// determine the new key (row TBD)
 			String newKey = data._2()._1().get(0);
@@ -157,11 +152,15 @@ public final class WeatherEffectsOnParkingEvaluation {
 	  Tuple2<String, Tuple2<ArrayList<String>, ArrayList<String>>>, String, ArrayList<String>> {
 		public Tuple2<String, ArrayList<String>> call (Tuple2<String, 
 		 Tuple2<ArrayList<String>, ArrayList<String>>> data) {
-			//in data._2()._1() time stamp(0) and status(1)
-			//in data._2()._2() p1 lat(0) and lon(1) and p2 lat(2) and lon(3)
+			//in data._2()._1() -- raw data - GARAGECODE(0), VEHICLECOUNT(1), TOTALSPACES(2)
+			//in data._2()._2() -- meta data - GARAGECODE(0), LATITUDE(1), LONGITUDE(2)
+
 			// determine the new key
 			ArrayList<String> newData = new ArrayList<String>(data._2()._1());
-			String newKey = data._2()._2().get(0) + "," + data._2()._2().get(1) + "," + newData.get(0);
+
+			// determine percentage of available parking (vehicle count / total spaces) 
+			BigInteger percentAvailable = newData.get(1) / newData.get(2);
+			String newKey = data._2()._2().get(0) + "," + data._2()._2().get(1) + "," + newData.get(0) + ":" + percentAvailable;
 			newData.remove(0);
 			
 			return new Tuple2<String, ArrayList<String>>(newKey, newData);
@@ -189,26 +188,28 @@ public final class WeatherEffectsOnParkingEvaluation {
 
 			// ********* BELOW NEEDS TO CHANGE ************ //
 			//split the data on commas
-			String[] keyValuePairs = row.split(",");
 
-			Map<String, String> keyValues = new HashMap();
-			for (String str : keyValuePairs) {
-				String[] tempValue = str.split(":");
+			// String[] keyValuePairs = row.split(",");
 
-				keyValues.put(tempValue[0], tempValue[1]);
-			}
+			// Map<String, String> keyValues = new HashMap();
+			// for (String str : keyValuePairs) {
+			// 	String[] tempValue = str.split(":");
+
+			// 	keyValues.put(tempValue[0], tempValue[1]);
+			// }
 			
-			//get the data to correlate it
-			String date = keyValues.forEach(() => {
+			// //get the data to correlate it
+			// String date = keyValues.forEach(() => {
 
-			});
+			// });
 			
-			//get the weather data
-			ArrayList<String> data = new ArrayList<String>();
-			data.add(fields[0]);
+			// //get the weather data
+			// ArrayList<String> data = new ArrayList<String>();
+			// data.add(fields[0]);
 		
-			//make sure all the data was good and return it
-			return new Tuple2<String, ArrayList<String>>(date, data);
+			// //make sure all the data was good and return it
+			// return new Tuple2<String, ArrayList<String>>(date, data);
+				return null;
 		}
 	}
 
@@ -219,7 +220,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 				VEHICLECOUNT(0),UPDATETIME(1),_ID(2),TOTALSPACES(3),
 				GARAGECODE(4),STREAMTIME(5)
 
-			 	we want the VEHICLECOUNT(0) & GARAGECODE(4) for correlating 
+			 	we want the VEHICLECOUNT(0), TOTALSPACES(3), GARAGECODE(4) for correlating 
 			 	events & weather to parking
 			*/
 			
@@ -231,6 +232,7 @@ public final class WeatherEffectsOnParkingEvaluation {
 			//get the traffic lat and long associated with the id
 			ArrayList<String> data = new ArrayList<String>();
 			data.add(fields[0]);
+			data.add(fields[3]);
 			
 			return new Tuple2<String, ArrayList<String>>(key, data);
 		}
@@ -288,32 +290,6 @@ public final class WeatherEffectsOnParkingEvaluation {
 			dateTimeAndAttendees.add(fields[15]);
 		
 			return new Tuple2<String, ArrayList<String>>(key, dateTimeAndAttendees);
-		}
-	}
-
-  private static class GetLibraryEventForCorrelationWithPollution implements 
-   PairFunction<String, String, ArrayList<String>> {
-		public Tuple2<String, ArrayList<String>> call(String row) { 
-			/* Format (one-line):
-				** Library Event **
-				LID(0),CITY(1),ENDTIME(2),TITLE(3),URL(4),PRICE(5),CHANGED(6),
-				CONTENT(7),ZIPCODE(8),LIBRARY(9),IMAGEURL(10),TEASER(11),
-				STREET(12),STATUS(13),LONGITUDE(14),STARTTIME(15),
-				LATITUDE(16),_ID(17),ID(18),STREAMTIME(19)
-
-			 	we want the ID(18) and ENDTIME(2) for correlating events to pollution
-			*/
-
-			//split the data on commas
-			String[] fields = row.split(",");
-			//get the library event id that this point corresponds to
-			String libraryKey = fields[18];
-			
-			//get the endtime associated with the id
-			ArrayList<String> dateTime = new ArrayList<String>();
-			dateTime.add(fields[2]);
-		
-			return new Tuple2<String, ArrayList<String>>(key, dateTime);
 		}
 	}
 }
