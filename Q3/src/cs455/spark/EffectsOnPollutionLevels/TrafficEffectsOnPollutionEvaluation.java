@@ -11,6 +11,10 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.math.BigInteger;
+import java.util.Iterator;
+
+import cs455.spark.Utils.Helper;
+import cs455.spark.Utils.WeatherParser;
 
 public final class TrafficEffectsOnPollutionEvaluation
 {
@@ -60,13 +64,53 @@ public final class TrafficEffectsOnPollutionEvaluation
 		
 		// reduce them to the keys we care about
 		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
+		correlated.saveAsTextFile(args[3]+"0");
 		
-		// combine duplicate keys
-        JavaPairRDD<String, ArrayList<String>> reduced = correlated.reduceByKey(new ReduceDuplicateKeys());
+		//average the pollution reading on the weather keys
+		JavaPairRDD<String, ArrayList<String>> trafficTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
+		JavaPairRDD<String, ArrayList<String>> trafficAvgs = trafficTotals.mapToPair(new Helper.AverageData());
+		trafficAvgs.saveAsTextFile(args[3]+"_avgs");
 		
-		// Average the pollition levels
-		JavaPairRDD<String, ArrayList<String>> averaged = reduced.mapToPair(new AveragePollutionLevels());
-		averaged.saveAsTextFile(args[3]);
+		//determine the min and max
+		JavaPairRDD<String, ArrayList<String>> trafficMins = correlated.reduceByKey(new Helper.MinOfData());
+		JavaPairRDD<String, ArrayList<String>> trafficMinsNoCount = trafficMins.mapToPair(new Helper.StripCountOff());
+		JavaPairRDD<String, ArrayList<String>> trafficMaxs = correlated.reduceByKey(new Helper.MaxOfData());
+		JavaPairRDD<String, ArrayList<String>> trafficMaxsNoCount = trafficMaxs.mapToPair(new Helper.StripCountOff());
+		//trafficMinsNoCount.saveAsTextFile(args[3]+"_mins");
+		//trafficMaxsNoCount.saveAsTextFile(args[3]+"_maxs");
+		
+		//determine the std dev
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficWithAvgs = trafficAvgs.join(correlated);
+		JavaPairRDD<String, ArrayList<String>> trafficPrepedForStdDev = trafficWithAvgs.mapToPair(new Helper.PrepForStdDevOfData());
+		JavaPairRDD<String, ArrayList<String>> trafficPrepedForStdDevReduced = trafficPrepedForStdDev.reduceByKey(new Helper.ReduceDuplicateKeysDoubles());
+		JavaPairRDD<String, ArrayList<String>> trafficStdDevs = trafficPrepedForStdDevReduced.mapToPair(new Helper.StdDevOfData());
+		trafficWithAvgs.saveAsTextFile(args[3]+"1");
+		trafficPrepedForStdDev.saveAsTextFile(args[3]+"2");
+		trafficPrepedForStdDevReduced.saveAsTextFile(args[3]+"3");
+		trafficStdDevs.saveAsTextFile(args[3]+"_stddevs");		
+		
+		/* try maing them smaller? still doesn't work
+		JavaPairRDD<String, ArrayList<String>> badOnly = correlated.filter(x -> x._1().equals("BAD"));
+		badOnly.saveAsTextFile(args[3]+"B");
+		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficWithAvgs = trafficAvgs.join(badOnly);
+		JavaPairRDD<String, ArrayList<String>> trafficPrepedForStdDev = trafficWithAvgs.mapToPair(new Helper.PrepForStdDevOfData());
+		JavaPairRDD<String, ArrayList<String>> trafficPrepedForStdDevReduced = trafficPrepedForStdDev.reduceByKey(new Helper.ReduceDuplicateKeysDoubles());
+		JavaPairRDD<String, ArrayList<String>> trafficStdDevs = trafficPrepedForStdDevReduced.mapToPair(new Helper.StdDevOfData());
+		trafficWithAvgs.saveAsTextFile(args[3]+"1");
+		trafficPrepedForStdDev.saveAsTextFile(args[3]+"2");
+		trafficPrepedForStdDevReduced.saveAsTextFile(args[3]+"3");
+		trafficStdDevs.saveAsTextFile(args[3]+"_stddevsB");
+		
+		JavaPairRDD<String, ArrayList<String>> goodOnly = correlated.filter(x -> x._1().equals("GOOD"));
+		trafficWithAvgs = goodOnly.join(badOnly);
+		trafficPrepedForStdDev = trafficWithAvgs.mapToPair(new Helper.PrepForStdDevOfData());
+		trafficPrepedForStdDevReduced = trafficPrepedForStdDev.reduceByKey(new Helper.ReduceDuplicateKeysDoubles());
+		trafficStdDevs = trafficPrepedForStdDevReduced.mapToPair(new Helper.StdDevOfData());
+		trafficWithAvgs.saveAsTextFile(args[3]+"1G");
+		trafficPrepedForStdDev.saveAsTextFile(args[3]+"2G");
+		trafficPrepedForStdDevReduced.saveAsTextFile(args[3]+"3G");
+		trafficStdDevs.saveAsTextFile(args[3]+"_stddevsG");
+*/
 
 		// end the session
 		spark.stop();

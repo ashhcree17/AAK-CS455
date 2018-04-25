@@ -64,8 +64,6 @@ public final class WeatherEffectsOnPollutionEvaluation
 		JavaPairRDD<String, ArrayList<String>> weatherPrepedForStdDev = weatherWithAvgs.mapToPair(new Helper.PrepForStdDevOfData());
 		JavaPairRDD<String, ArrayList<String>> weatherPrepedForStdDevReduced = weatherPrepedForStdDev.reduceByKey(new Helper.ReduceDuplicateKeysDoubles());
 		JavaPairRDD<String, ArrayList<String>> weatherStdDevs = weatherPrepedForStdDevReduced.mapToPair(new Helper.StdDevOfData());
-		weatherPrepedForStdDev.saveAsTextFile(args[2]+"2");
-		weatherPrepedForStdDevReduced.saveAsTextFile(args[2]+"3");
 		weatherStdDevs.saveAsTextFile(args[2]+"_stddevs");
 		
 		
