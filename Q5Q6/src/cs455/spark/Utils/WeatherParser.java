@@ -23,13 +23,11 @@ public final class WeatherParser
 		JavaSparkContext jsc = JavaSparkContext.fromSparkContext(sc);
 		
 		// read in the files (if passed a dir it will read all files in it)
-		//JavaRDD<String> pollutionLines = spark.read().textFile(args[0]).javaRDD();
 		JavaRDD<String> weatherTempLines = spark.read().textFile(weatherDir+"/*/tempm.txt").javaRDD();
 		JavaRDD<String> weatherPressLines = spark.read().textFile(weatherDir+"/*/pressurem.txt").javaRDD();
 		JavaRDD<String> weatherWindLines = spark.read().textFile(weatherDir+"/*/wspdm.txt").javaRDD();
 	
 		// get the needed values out of the lines
-		//JavaPairRDD<String, ArrayList<String>> pollutionData = pollutionLines.mapToPair(new GetPollutionForCorrelationWithTraffic());
 		JavaRDD<ArrayList<String>> weatherTempData = weatherTempLines.map(new GetWeatherData());
 		JavaRDD<ArrayList<String>> weatherPressData = weatherPressLines.map(new GetWeatherData());
 		JavaRDD<ArrayList<String>> weatherWindData = weatherWindLines.map(new GetWeatherData());

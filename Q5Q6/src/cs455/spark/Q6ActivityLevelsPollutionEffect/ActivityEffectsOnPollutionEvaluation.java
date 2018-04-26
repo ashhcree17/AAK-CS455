@@ -102,7 +102,7 @@ public final class ActivityEffectsOnPollutionEvaluation {
 			for (int i = 0; i < data1.size(); i++) {
 				d1Value = new BigInteger(data1.get(i));
 				d2Value = new BigInteger(data2.get(i));
-				combined.set(i, "" + Integer.parseInt(data1.get(i)) + Integer.parseInt(data2.get(i)));
+				combined.add("" + d1Value.add(d2Value));
 			}
 			
 			return combined;
