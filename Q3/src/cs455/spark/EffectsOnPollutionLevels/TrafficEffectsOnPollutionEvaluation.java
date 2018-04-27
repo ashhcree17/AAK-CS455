@@ -33,8 +33,8 @@ public final class TrafficEffectsOnPollutionEvaluation
 			.getOrCreate();
 
 		// read in the files (if passed a dir it will read all files in it)
-		JavaRDD<String> pollutionLines = spark.read().textFile(args[0]).javaRDD();
-		JavaRDD<String> trafficLines = spark.read().textFile(args[1]).javaRDD();
+		JavaRDD<String> pollutionLines = spark.read().textFile(args[0]+"/*.csv").javaRDD();
+		JavaRDD<String> trafficLines = spark.read().textFile(args[1]+"/*/*.csv").javaRDD();
 		JavaRDD<String> trafficMetaLines = spark.read().textFile(args[2]).javaRDD();
 	
 		// get the needed values out of the lines
@@ -64,20 +64,19 @@ public final class TrafficEffectsOnPollutionEvaluation
 		
 		// reduce them to the keys we care about
 		JavaPairRDD<String, ArrayList<String>> correlated = correlatedTuples.mapToPair(new CombineAndRekey());
-		correlated.saveAsTextFile(args[3]+"0");
-		
-		//average the pollution reading on the weather keys
-		JavaPairRDD<String, ArrayList<String>> trafficTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
-		JavaPairRDD<String, ArrayList<String>> trafficAvgs = trafficTotals.mapToPair(new Helper.AverageData());
-		trafficAvgs.saveAsTextFile(args[3]+"_avgs");
 		
 		//determine the min and max
 		JavaPairRDD<String, ArrayList<String>> trafficMins = correlated.reduceByKey(new Helper.MinOfData());
 		JavaPairRDD<String, ArrayList<String>> trafficMinsNoCount = trafficMins.mapToPair(new Helper.StripCountOff());
 		JavaPairRDD<String, ArrayList<String>> trafficMaxs = correlated.reduceByKey(new Helper.MaxOfData());
 		JavaPairRDD<String, ArrayList<String>> trafficMaxsNoCount = trafficMaxs.mapToPair(new Helper.StripCountOff());
-		//trafficMinsNoCount.saveAsTextFile(args[3]+"_mins");
-		//trafficMaxsNoCount.saveAsTextFile(args[3]+"_maxs");
+		trafficMinsNoCount.saveAsTextFile(args[3]+"_mins");
+		trafficMaxsNoCount.saveAsTextFile(args[3]+"_maxs");
+		
+		//average the pollution reading on the weather keys
+		JavaPairRDD<String, ArrayList<String>> trafficTotals = correlated.reduceByKey(new Helper.ReduceDuplicateKeys());
+		JavaPairRDD<String, ArrayList<String>> trafficAvgs = trafficTotals.mapToPair(new Helper.AverageData());
+		trafficAvgs.saveAsTextFile(args[3]+"_avgs");
 		
 		//determine the std dev
 		JavaPairRDD<String, Tuple2<ArrayList<String>, ArrayList<String>>> trafficWithAvgs = trafficAvgs.join(correlated);
